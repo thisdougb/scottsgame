@@ -1,159 +1,229 @@
-# Player State Component Architecture
+# D&D Turn-Based Card Game Architecture
 
 ## Overview
-The player state component manages all dynamic attributes of player characters in the D&D-style card game. It handles health, mana, armor, temporary effects, and permanent modifiers while maintaining turn-based consistency.
+This is a dungeons and dragons style turn-based card game built in Go. The architecture follows domain-driven design principles with clear separation of concerns between game mechanics, player state, card systems, and supporting infrastructure.
 
-## Design Principles
+## System Architecture
 
-### Separation of Concerns
-- **State Storage**: Core data structures for player attributes
-- **State Management**: Business logic for state transitions  
-- **Effect System**: Turn-based temporary modifications
-- **Modifier System**: Persistent attribute changes
-- **API Layer**: Clean interface for external systems
+### Core Design Principles
+- **Domain-Driven Design**: Each package represents a distinct domain concept
+- **Event-Driven Architecture**: Components communicate through events
+- **Clean Architecture**: Dependencies point inward toward business logic
+- **Testability**: Interfaces enable easy mocking and unit testing
+- **Immutability**: State changes are atomic and logged
 
-### Immutability and Consistency
-- State changes are atomic operations
-- All changes are logged for audit trails
-- Validation ensures state remains within valid bounds
-- Turn processing is deterministic
-
-## Component Breakdown
-
-### Core Types (`types.go`)
-```go
-PlayerState     // Main state container
-Effect          // Temporary turn-based changes  
-Modifier        // Persistent attribute changes
-StateChange     // Change history record
+### Component Overview
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Game Engine                          │
+├─────────────┬─────────────┬─────────────┬───────────────┤
+│   Player    │    Cards    │   Combat    │   Inventory   │
+│   State     │   System    │   System    │   System      │
+├─────────────┼─────────────┼─────────────┼───────────────┤
+│   Events    │     AI      │   Network   │ Persistence   │
+│   System    │   Players   │  Protocol   │    Layer      │
+└─────────────┴─────────────┴─────────────┴───────────────┘
 ```
 
-**Key Design Decisions:**
-- Effects have duration in turns and expiration logic
-- Modifiers can be permanent or temporary 
-- Both effects and modifiers track their source
-- State changes are immutable records
+## Package Structure
 
-### State Manager (`manager.go`) 
-The central coordinator handling:
-- Player lifecycle (create, retrieve, validate)
-- Core operations (damage, healing, resource consumption)
-- Turn processing (start/end turn effects)
-- State calculation with modifiers applied
+### Core Game Packages
 
-**Key Patterns:**
-- Manager maintains player registry and change history
-- All operations return errors for proper error handling
-- State changes are logged immediately when applied
-- Turn processing is event-driven
+#### `game/` - Game State & Turn Management
+- **Purpose**: Manages overall game state, turn order, and game phases
+- **Key Types**: `Game`, `TurnAction`, `GamePhase`, `GameStatus`
+- **Responsibilities**:
+  - Turn order and phase management
+  - Game state transitions
+  - Win/loss condition checking
+  - Action validation and coordination
 
-### Effects System (`effects.go`)
-Handles temporary modifications that expire:
-- Adding/removing effects with duration tracking
-- Stacking rules for multiple effects of same type
-- Turn-based duration management
-- Event triggers (on damage, on heal, etc.)
+#### `playerstate/` - Player Attributes & Effects
+- **Purpose**: Tracks dynamic player attributes (health, mana, armor) and effects
+- **Key Types**: `PlayerState`, `Effect`, `Modifier`, `StateChange`
+- **Responsibilities**:
+  - Health/mana/armor tracking
+  - Temporary effects with turn-based expiration
+  - Permanent modifiers from equipment/spells  
+  - State change history and validation
+- **Documentation**: See `playerstate/README.md` for detailed design
 
-**Stacking Strategy:**
-- Stackable effects accumulate (armor bonuses)
-- Non-stackable effects replace (shields take highest)
-- Source tracking prevents duplicate effects from same card
+#### `cards/` - Card System
+- **Purpose**: Defines cards, their effects, and deck management
+- **Key Types**: `Card`, `Deck`, `Hand`, `CardEffect`
+- **Responsibilities**:
+  - Card definitions and metadata
+  - Deck construction and shuffling
+  - Hand management
+  - Card effect definitions
 
-### Modifiers System (`modifiers.go`)
-Manages longer-term stat changes:
-- Equipment bonuses (armor, weapons)
-- Permanent spell effects
-- Character advancement bonuses
-- Calculated attribute values
+#### `combat/` - Battle Mechanics
+- **Purpose**: Handles combat resolution and damage calculation
+- **Key Types**: `Combat`, `Attack`, `DamageCalculation`
+- **Responsibilities**:
+  - Combat phase management
+  - Damage calculation with armor/resistance
+  - Attack resolution and targeting
+  - Combat event generation
 
-**Modifier Types:**
-- Additive: Simple number additions/subtractions
-- Multiplicative: Percentage-based modifications  
-- Override: Replace base value entirely
+#### `inventory/` - Items & Equipment
+- **Purpose**: Manages player items and equipment
+- **Key Types**: `Inventory`, `Item`, `ItemEffect`
+- **Responsibilities**:
+  - Item storage and management
+  - Equipment slot management
+  - Item effects and stat bonuses
+  - Inventory capacity limits
 
-### Public API (`api.go`)
-Clean interface for external systems:
-- StateManager interface for dependency injection
-- CardEffect integration for game card system
-- Batch operations for complex multi-step changes
-- UI-friendly summary data structures
+### Supporting Systems
+
+#### `events/` - Event System
+- **Purpose**: Provides pub/sub messaging between components
+- **Key Types**: `Event`, `EventSystem`, `GameLog`
+- **Responsibilities**:
+  - Event publishing and subscription
+  - Game action logging
+  - Cross-component communication
+  - Replay functionality support
+
+#### `ai/` - Computer Players
+- **Purpose**: Implements AI opponents with different strategies
+- **Key Types**: `AI`, `Decision`, `Strategy`
+- **Responsibilities**:
+  - AI decision making
+  - Strategy implementation
+  - Difficulty scaling
+  - Performance evaluation
+
+### Future Extension Points
+
+#### `network/` - Multiplayer Support
+- Real-time multiplayer protocol
+- State synchronization
+- Connection management
+- Anti-cheat validation
+
+#### `persistence/` - Save/Load System  
+- Game state serialization
+- Player progress tracking
+- Deck storage
+- Settings management
+
+#### `ui/` - User Interface
+- Game board rendering
+- Card display and interaction
+- Player status displays
+- Menu systems
 
 ## Data Flow
 
-### Turn Processing
-1. **Turn Start**: Process beginning-of-turn effects (regeneration, poison)
-2. **Card Play**: Apply card effects through API
-3. **State Calculation**: Compute effective values with all modifiers  
-4. **Turn End**: Process end-of-turn effects, expire durations
-5. **Cleanup**: Remove expired effects, validate state
+### Turn-Based Game Loop
+1. **Turn Start**: 
+   - Events system notifies all components
+   - Player state processes beginning-of-turn effects
+   - AI makes decisions for computer players
 
-### Card Application
-1. Parse CardEffect definition
-2. Validate targeting rules  
-3. Apply direct stat changes
-4. Add effects and modifiers
-5. Log all changes with card as source
-6. Return success/failure to game engine
+2. **Player Actions**:
+   - Cards played through card system
+   - Combat initiated through combat system
+   - Items used through inventory system
+   - All actions validated by game engine
 
-### State Queries
-1. Retrieve base player state
-2. Apply all active modifiers
-3. Apply all active effects  
-4. Return calculated effective values
-5. Cache results for performance
+3. **Effect Resolution**:
+   - Player state calculates effective values
+   - Combat system resolves damage
+   - Events logged for all changes
 
-## Integration Points
+4. **Turn End**:
+   - Player state processes end-of-turn effects
+   - Effects expire, modifiers update
+   - Game checks win/loss conditions
 
-### Game Engine Integration
-- StateManager interface allows easy mocking for tests
-- Card system calls ApplyCardEffect for all card plays
-- Turn system calls ProcessTurnStart/End for each player
-- UI queries GetPlayerSummary for display
+### Inter-Component Communication
 
-### Future Extensions
-- **Persistence Layer**: Save/load player states
-- **Network Layer**: Synchronize state across clients  
-- **Analytics**: Track state changes for balancing
-- **AI Integration**: State evaluation for computer players
+#### Event-Driven Updates
+```
+Card Played → Events → Player State → Combat → Events → UI Update
+     ↓                     ↓              ↓
+  Game Log         State Changes    Damage Calc
+```
+
+#### State Queries
+- UI queries player state for display
+- AI queries all systems for decision making
+- Combat system queries player state for damage calculation
+- Game engine queries all systems for validation
+
+## Integration Patterns
+
+### Dependency Injection
+- All major components define interfaces
+- Concrete implementations injected at runtime
+- Enables easy testing with mocks
+- Supports different implementations (local vs network)
+
+### Event Sourcing
+- All state changes generate events
+- Events stored for replay/debugging
+- Enables rollback for network issues
+- Supports spectator mode
+
+### Command Pattern
+- Player actions encapsulated as commands
+- Commands validated before execution
+- Supports undo functionality
+- Network serialization friendly
 
 ## Error Handling Strategy
 
-### Validation Levels
-1. **Input Validation**: Check parameters at API boundaries
-2. **State Validation**: Ensure state consistency after changes
-3. **Business Logic**: Validate game rules (sufficient mana, etc.)
-4. **System Validation**: Verify internal data consistency
+### Validation Layers
+1. **Input Validation**: UI/API boundary validation
+2. **Business Rules**: Game rule enforcement  
+3. **State Consistency**: Cross-component validation
+4. **System Integrity**: Internal consistency checks
 
-### Recovery Patterns
-- Failed operations don't modify state
-- State history enables rollback if needed
-- Validation errors include details for debugging
+### Recovery Mechanisms
+- Failed actions don't change game state
+- Event log enables state reconstruction
 - Graceful degradation for non-critical failures
+- Network reconnection and state synchronization
 
 ## Performance Considerations
 
-### Optimization Strategies
-- Cache effective attribute calculations
-- Lazy evaluation of complex state queries
-- Batch operations for multiple simultaneous changes
-- Minimal memory allocation in hot paths
+### Memory Management
+- Object pooling for frequently created objects
+- Efficient collections for large card sets
+- Minimal allocation in hot paths
+- Memory-mapped files for large assets
 
-### Scalability Notes  
-- State is kept in memory for fast access
-- History pruning for long-running games
-- Concurrent access patterns need synchronization
-- Consider event sourcing for distributed systems
+### Concurrency
+- Read-heavy operations use concurrent-safe collections
+- Write operations use channels for coordination
+- AI computation runs in separate goroutines
+- Network I/O uses async patterns
+
+### Scalability
+- Stateless components enable horizontal scaling
+- Event sourcing supports distributed systems
+- Component isolation enables selective optimization
+- Caching layers for expensive calculations
 
 ## Testing Strategy
 
-### Unit Test Coverage
-- Each function has positive and negative test cases
-- Effect stacking logic thoroughly tested
-- Turn processing edge cases covered
-- State validation boundary conditions tested
+### Unit Testing
+- Each package has comprehensive unit tests
+- Interface-based mocking for dependencies
+- Property-based testing for game rules
+- Benchmark tests for performance-critical paths
 
-### Integration Testing
-- Full turn cycles with multiple players
-- Complex card effect combinations
-- Error recovery scenarios
-- Performance testing with large effect counts
+### Integration Testing  
+- Full game scenarios with multiple players
+- AI vs AI automated testing
+- Network protocol testing
+- State consistency validation
+
+### System Testing
+- Load testing with many concurrent games
+- Chaos engineering for failure scenarios
+- Performance profiling and optimization
+- Security testing for multiplayer features
